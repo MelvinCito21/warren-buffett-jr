@@ -7,9 +7,9 @@
     "sector": "Technology",
     "industry": "Semiconductors",
     "price": 120.5,
-    "mktCap": 2950000000000,
     "beta": 1.72,
     "isEtf": false,
-    "isActivelyTrading": true
+    "isActivelyTrading": true,
+    "marketCap": 2950000000000
   }
 ]

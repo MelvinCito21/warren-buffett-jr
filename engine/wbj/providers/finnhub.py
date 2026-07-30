@@ -14,6 +14,7 @@ already redacts `token` from logged request params.
 
 from __future__ import annotations
 
+from datetime import date, timedelta
 from typing import Any
 
 from wbj.providers.base import Provider
@@ -64,13 +65,27 @@ class FinnhubProvider(Provider):
             max_age_days=_MAX_AGE_ESTIMATES,
         )
 
-    def earnings_calendar(self, t: str) -> list | dict | None:
-        """Upcoming/historical earnings calendar entries."""
+    def earnings_calendar(
+        self, t: str, back_days: int = 400, ahead_days: int = 200,
+    ) -> list | dict | None:
+        """Earnings calendar entries around today, with consensus estimates.
+
+        Without an explicit `from`/`to` the endpoint answers 200 and an empty
+        `earningsCalendar`, so the window is always sent. This is also the free
+        tier's only route to consensus numbers: each entry carries
+        `epsEstimate`/`revenueEstimate`, while the dedicated
+        `stock/eps-estimate` and `stock/revenue-estimate` endpoints are 403
+        without a paid plan.
+        """
         if not self.available:
             return None
+        today = date.today()
         return self.get_json(
             f"{BASE_URL}/calendar/earnings",
-            self._params(symbol=t),
+            self._params(symbol=t, **{
+                "from": (today - timedelta(days=back_days)).isoformat(),
+                "to": (today + timedelta(days=ahead_days)).isoformat(),
+            }),
             "earnings_calendar",
             t,
             max_age_days=_MAX_AGE_CALENDAR,

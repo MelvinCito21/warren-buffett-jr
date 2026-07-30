@@ -52,11 +52,43 @@ _QUICK_LABEL = {
     "risk": "Risk & Resilience (quick)",
     "valuation": "Valuation (quick)",
 }
+# Default N/S reason per category: the benign, company-side explanation,
+# used only when the data is genuinely absent (a 200 with nothing in it).
 _NS_REASON = {
     "market": "sin cobertura de analistas (FMP)",
     "technical": "historial de precio insuficiente (FMP)",
     "valuation": "sin precio de mercado (FMP)",
 }
+
+# Which FMP endpoint's status decides whether a category was plan-blocked
+# rather than genuinely empty. Keyed to the sources recorded in the
+# packet's `fmp_status` block by `_build_packet`.
+_CATEGORY_SOURCE = {
+    "market": "estimates",
+    "technical": "ohlcv",
+    "valuation": "profile",
+}
+
+_PLAN_BLOCKED_REASON = (
+    "bloqueado por el plan de FMP — el dato existe, la suscripción no lo "
+    "alcanza (no es que la empresa no lo tenga)"
+)
+
+
+def _ns_reason(key: str, fmp_status: dict | None) -> str:
+    """Honest reason a category is N/S: distinguishes a plan block (402)
+    from data the company genuinely lacks.
+
+    A 402 means FMP has the data but this subscription (or the ticker's
+    universe) does not reach it — reporting that as "no analyst coverage"
+    would put a negative fact on the company that isn't true. Any other
+    outcome falls back to the benign default.
+    """
+    source = _CATEGORY_SOURCE.get(key)
+    status = (fmp_status or {}).get(source) if source else None
+    if status == 402:
+        return _PLAN_BLOCKED_REASON
+    return _NS_REASON[key]
 
 
 def _val(x: float | None, name: str, unit: str = "ratio") -> Value:
@@ -303,7 +335,8 @@ def quick_scorecard(packet: dict) -> dict:
             rows.append({
                 "key": key, "label": _QUICK_LABEL[key], "max_points": max_pts,
                 "score10": None, "points": None, "coverage": 0.0,
-                "status": "not_scorable", "reason": _NS_REASON[key],
+                "status": "not_scorable",
+                "reason": _ns_reason(key, packet.get("fmp_status")),
             })
 
     overall = round(weighted / covered_pts, 1) if covered_pts else None

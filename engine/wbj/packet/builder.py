@@ -438,7 +438,7 @@ def build_packet(ticker: str, providers: Providers, now: datetime) -> Packet:
         "diluted_shares": facts_table["diluted_shares"].value,
         "total_debt": facts_table["total_debt"].value,
         "cash": facts_table["cash"].value,
-        "market_cap": profile.get("mktCap"),
+        "market_cap": profile.get("marketCap") or profile.get("mktCap"),
         "beta": profile.get("beta"),
     }
 

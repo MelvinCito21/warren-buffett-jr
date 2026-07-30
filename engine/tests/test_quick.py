@@ -135,6 +135,31 @@ def test_fmp_categories_ns_without_market_data():
     assert ns["valuation"]["reason"] == "sin precio de mercado (FMP)"
 
 
+def test_plan_blocked_category_says_so_not_that_the_company_lacks_data():
+    """A 402 means FMP has the data but the plan can't reach it. Reporting
+    "sin cobertura de analistas" would pin a false negative on the company."""
+    p = _packet()
+    p["fmp_status"] = {"estimates": 402, "ohlcv": 200, "profile": 200}
+
+    ns = {r["key"]: r for r in quick_scorecard(p)["categories"]
+          if r["status"] == "not_scorable"}
+
+    assert "bloqueado por el plan de FMP" in ns["market"]["reason"]
+    # Endpoints that answered 200 keep the benign, company-side reason.
+    assert ns["technical"]["reason"] == "historial de precio insuficiente (FMP)"
+    assert ns["valuation"]["reason"] == "sin precio de mercado (FMP)"
+
+
+def test_empty_200_keeps_the_company_side_reason():
+    """A 200 with no rows is genuinely no coverage, not a plan block."""
+    p = _packet()
+    p["fmp_status"] = {"estimates": 200, "ohlcv": 200, "profile": 200}
+
+    market = _by_key(quick_scorecard(p))["market"]
+
+    assert market["reason"] == "sin cobertura de analistas (FMP)"
+
+
 def test_technical_ns_with_too_little_history():
     p = _packet()
     p["market_data"] = {"ohlcv": _ohlcv_rising(30)}  # < 200 sessions

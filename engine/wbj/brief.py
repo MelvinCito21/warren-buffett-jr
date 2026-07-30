@@ -243,6 +243,56 @@ def _insider_highlights(trades: list[dict] | None,
     return out[:6]
 
 
+def _insiders_section(packet: dict, md: dict) -> list[dict]:
+    """Insider highlights, preferring EDGAR's reading over FMP's feed.
+
+    FMP's rows carry a `transactionType` string that `_insider_highlights`
+    splits on its first letter, so a "P" prefix means purchase. That
+    collapses meanings EDGAR keeps apart: a gift, an award and a tax
+    withholding are all disposals of shares that nobody sold. When
+    `insiders_edgar` is present it has already applied the code table and
+    the $1M threshold, so it wins.
+    """
+    edgar_view = packet.get("insiders_edgar") or {}
+    if not edgar_view.get("disponible"):
+        return _insider_highlights(md.get("insiders"))
+
+    rows = [
+        {
+            "name": t["persona"],
+            "side": t["lado"],
+            "value": round(t["valor_usd"], 2),
+            "shares": t["acciones"],
+            "price": t["precio"],
+            "date": t["fecha"],
+            "title": t["cargo"],
+            "scheduled_10b5_1": t["programada_10b5_1"],
+        }
+        for t in edgar_view.get("compras", []) + edgar_view.get("ventas", [])
+    ]
+    rows.sort(key=lambda r: r.get("date") or "", reverse=True)
+    return rows[:6]
+
+
+def _insiders_flow_section(packet: dict, md: dict) -> dict:
+    """Buy-vs-sell flow, preferring EDGAR's reading over FMP's feed.
+
+    FMP's flow silently drops every row whose `transactionType` does not
+    start with P or S — including rows where that field is an empty
+    string, which for IREN was 20 of 43 rows. Dropped and excluded look
+    identical in the output, so $367M of activity left no trace. EDGAR
+    classifies every row by its filed code.
+
+    It also blends option sales into stock sales: IREN's Co-CEOs disposed
+    of $49M in "Stock Options (Right to Buy)" under code `S`.
+    """
+    edgar_view = packet.get("insiders_edgar") or {}
+    flow = edgar_view.get("flujo")
+    if edgar_view.get("disponible") and isinstance(flow, dict):
+        return flow
+    return _insiders_flow(md.get("insiders"))
+
+
 def _insiders_flow(trades: list[dict] | None) -> dict:
     """Net open-market insider flow across the feed: total purchase vs sale
     dollars (`shares * price`). Gifts/awards (price 0) contribute nothing.
@@ -323,8 +373,8 @@ def company_brief(packet: dict, scorecard: dict, targets: dict) -> dict:
         "watch": {
             "levels": _levels(targets),
             "catalysts": _catalysts(md.get("earnings"), as_of),
-            "insiders": _insider_highlights(md.get("insiders")),
-            "insiders_flow": _insiders_flow(md.get("insiders")),
+            "insiders": _insiders_section(packet, md),
+            "insiders_flow": _insiders_flow_section(packet, md),
             "risks": _risks(packet, scorecard),
         },
     }

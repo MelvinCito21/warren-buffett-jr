@@ -135,13 +135,13 @@ def test_finnhub_methods_use_distinct_cache_keys(tmp_path):
     p.estimates("NVDA")
     p.quote("NVDA")
 
-    assert cache.get("NVDA", "estimates") == _load_fixture("finnhub", "eps_estimate")
-    assert cache.get("NVDA", "quote") == _load_fixture("finnhub", "quote")
+    assert cache.get("NVDA", "finnhub_estimates") == _load_fixture("finnhub", "eps_estimate")
+    assert cache.get("NVDA", "finnhub_quote") == _load_fixture("finnhub", "quote")
 
 
 def test_finnhub_get_json_serves_from_cache_without_hitting_transport(tmp_path):
     cache = Cache(tmp_path)
-    cache.put("NVDA", "quote", _load_fixture("finnhub", "quote"))
+    cache.put("NVDA", "finnhub_quote", _load_fixture("finnhub", "quote"))
 
     def handler(request):
         raise AssertionError("transport should not be called on cache hit")
@@ -224,12 +224,12 @@ def test_fred_series_cache_key_is_namespaced_by_series_id(tmp_path):
 
     p.series("DGS10")
 
-    assert cache.get("_macro", "fred_DGS10") == _load_fixture("fred", "dgs10")
+    assert cache.get("_macro", "fred_fred_DGS10") == _load_fixture("fred", "dgs10")
 
 
 def test_fred_series_serves_from_cache_without_hitting_transport(tmp_path):
     cache = Cache(tmp_path)
-    cache.put("_macro", "fred_DGS10", _load_fixture("fred", "dgs10"))
+    cache.put("_macro", "fred_fred_DGS10", _load_fixture("fred", "dgs10"))
 
     def handler(request):
         raise AssertionError("transport should not be called on cache hit")

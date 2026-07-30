@@ -282,5 +282,5 @@ def test_cik_for_and_companyfacts_use_distinct_cache_entries(tmp_path):
     p.companyfacts(1045810)
 
     # tickers map cached under a fixed global key regardless of ticker
-    assert cache.get("_GLOBAL", "tickers") == _load_fixture("tickers_sample")
-    assert cache.get("CIK0001045810", "companyfacts") == _load_fixture("companyfacts_sample")
+    assert cache.get("_GLOBAL", "edgar_tickers") == _load_fixture("tickers_sample")
+    assert cache.get("CIK0001045810", "edgar_companyfacts") == _load_fixture("companyfacts_sample")

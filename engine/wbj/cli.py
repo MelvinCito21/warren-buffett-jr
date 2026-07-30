@@ -17,6 +17,7 @@ from wbj.config import load_settings
 from wbj.core.nullstates import EvidenceClass, NullState, Value
 from wbj.core.scoring import Category, Dimension, anchor_score
 from wbj.core.formulas import yoy
+from wbj.filings.service import insider_activity, superinvestor_positions
 from wbj.providers.cache import Cache
 from wbj.providers.edgar import EdgarProvider
 from wbj.providers.fmp import FMPProvider
@@ -56,24 +57,69 @@ def _providers():
     return settings, EdgarProvider(settings, cache), FMPProvider(settings, cache)
 
 
+def _is_full_period(row: dict) -> bool:
+    """True for a row covering a whole fiscal year, or a balance-sheet instant.
+
+    `form == "10-K" and fp == "FY"` does *not* mean "one year": a 10-K also
+    tags its quarterly durations that way, so Q1-Q3 rows leak into the annual
+    series and land as extra points on the same calendar year. Duration rows
+    carry `start`; instants (equity, debt, cash) carry only `end` and are kept
+    as-is.
+    """
+    start = row.get("start")
+    if not start:
+        return True
+    try:
+        days = (date.fromisoformat(row["end"]) - date.fromisoformat(start)).days
+    except (ValueError, KeyError):
+        return False
+    return 340 <= days <= 400  # 52/53-week fiscal years, with slack
+
+
 def _annual_series(facts: dict, tags: list[str]) -> list[dict]:
-    """Extract annual (10-K FY) datapoints for the first tag that has data."""
+    """Annual (10-K FY) datapoints, merged across `tags` in priority order.
+
+    Companies migrate between US-GAAP tags mid-history (NVDA moved off
+    `RevenueFromContractWithCustomerExcludingAssessedTax` after FY2022), so
+    taking the first tag that has *any* data silently truncates the series at
+    the migration year. Every tag is merged instead: earlier tags win a year
+    that several report, later tags fill the years the earlier ones lack.
+    """
     gaap = facts.get("facts", {}).get("us-gaap", {})
-    for tag in tags:
+    by_end: dict[str, dict] = {}
+    # Reversed so earlier (higher-priority) tags overwrite later ones.
+    for tag in reversed(tags):
         units = gaap.get(tag, {}).get("units", {})
         rows = units.get("USD") or units.get("shares") or []
-        annual = [r for r in rows if r.get("form") == "10-K" and r.get("fp") == "FY"]
-        if annual:
-            # Deduplicate restatements: keep the latest filing per fiscal year end.
-            by_end: dict[str, dict] = {}
-            for r in sorted(annual, key=lambda r: r.get("filed", "")):
-                by_end[r["end"]] = r
-            return sorted(by_end.values(), key=lambda r: r["end"])
-    return []
+        annual = [
+            r for r in rows
+            if r.get("form") == "10-K" and r.get("fp") == "FY" and _is_full_period(r)
+        ]
+        # Deduplicate restatements: keep the latest filing per fiscal year end.
+        for r in sorted(annual, key=lambda r: r.get("filed", "")):
+            by_end[r["end"]] = r
+    return sorted(by_end.values(), key=lambda r: r["end"])
 
 
 def _latest(series: list[dict]) -> float | None:
     return series[-1]["val"] if series else None
+
+
+def _ohlcv_with_fallback(ticker: str, fmp) -> list[dict] | None:
+    """Daily bars for the technical category, FMP first then Yahoo.
+
+    FMP restricts price history to the symbols in the subscription's universe
+    and 402s the rest, which left every uncovered ticker with no history and so
+    a N/S technical score. `targets.price_history` is the keyless Yahoo feed
+    already used for the webapp chart; remapped to the FMP bar shape
+    (`date`/`close`) it is what `quick._closes_chrono` reads.
+    """
+    bars = fmp.ohlcv_daily(ticker, years=1, today=date.today())
+    if bars:
+        return bars
+    from wbj.targets import price_history
+
+    return [{"date": r["time"], "close": r["value"]} for r in price_history(ticker)] or None
 
 
 def _build_packet(ticker: str) -> dict:
@@ -91,6 +137,12 @@ def _build_packet(ticker: str) -> dict:
         "as_of": date.today().isoformat(),
         "entity": facts.get("entityName"),
         "sources": {"edgar": "companyfacts", "fmp": fmp.available},
+        # Insiders and superinvestors read straight from EDGAR rather than
+        # FMP, which resells the same filings behind a plan that 402s here.
+        "insiders_edgar": insider_activity(edgar, cik),
+        "superinvestors": superinvestor_positions(
+            edgar, facts.get("entityName") or ticker
+        ),
         "annual": {
             "revenue": _annual_series(facts, _REVENUE_TAGS),
             "net_income": _annual_series(facts, _NET_INCOME_TAGS),
@@ -114,11 +166,23 @@ def _build_packet(ticker: str) -> dict:
         # quick.py. Missing sub-keys keep the dependent category N/S.
         packet["market_data"] = {
             "price": prof0.get("price"),
-            "market_cap": prof0.get("mktCap"),
-            "ohlcv": fmp.ohlcv_daily(ticker, years=1, today=date.today()),
+            # /stable returns `marketCap`; `mktCap` was the legacy /v3 name,
+            # kept as a fallback for profiles already in the cache.
+            "market_cap": prof0.get("marketCap") or prof0.get("mktCap"),
+            "ohlcv": _ohlcv_with_fallback(ticker, fmp),
             "estimates": fmp.analyst_estimates(ticker),
             "earnings": fmp.earnings_calendar(ticker),
             "insiders": fmp.insider_trades(ticker),
+        }
+        # Why each FMP-backed category might be N/S: a 402 means the plan
+        # or the ticker's universe blocks the endpoint (the data exists,
+        # the subscription doesn't reach it), which the scorecard must not
+        # report as the company having no analysts / no history. Recorded
+        # per source right after the fetch, while last_status is still hot.
+        packet["fmp_status"] = {
+            "estimates": fmp.last_status_for("analyst_estimates"),
+            "ohlcv": fmp.last_status_for("ohlcv_daily"),
+            "profile": fmp.last_status_for("profile"),
         }
     return packet
 

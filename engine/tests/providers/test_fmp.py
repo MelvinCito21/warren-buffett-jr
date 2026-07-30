@@ -8,7 +8,7 @@ import httpx
 
 from wbj.config import Settings
 from wbj.providers.cache import Cache
-from wbj.providers.fmp import FMPProvider
+from wbj.providers.fmp import ESTIMATES_MAX_LIMIT, FMPProvider
 
 FIXTURES_DIR = Path(__file__).parent.parent / "fixtures" / "fmp"
 
@@ -110,6 +110,42 @@ def test_income_annual_custom_limit(tmp_path):
     p.income_annual("NVDA", limit=3)
 
     assert captured["request"].url.params.get("limit") == "3"
+
+
+def test_statement_limit_is_not_clamped(tmp_path):
+    """Statements have no `limit` ceiling on the current plan.
+
+    A global clamp used to cut every request to 5, which was right for the
+    old subscription but now discards statement history the plan serves —
+    and does it invisibly, since the response looks valid, just shorter.
+    """
+    captured = {}
+    p = _make_provider(tmp_path, _capturing_handler("income_annual", captured))
+
+    p.income_annual("NVDA", limit=20)
+
+    assert captured["request"].url.params.get("limit") == "20"
+
+
+def test_analyst_estimates_limit_clamped_to_its_ceiling(tmp_path):
+    """FMP 402s the whole request when `limit` exceeds an endpoint's
+    ceiling, so an over-limit ask must be clamped rather than sent and
+    lost. Estimates still cap at 10 while other endpoints do not."""
+    captured = {}
+    p = _make_provider(tmp_path, _capturing_handler("analyst_estimates", captured))
+
+    p.analyst_estimates("NVDA", limit=ESTIMATES_MAX_LIMIT + 50)
+
+    assert captured["request"].url.params.get("limit") == str(ESTIMATES_MAX_LIMIT)
+
+
+def test_analyst_estimates_limit_at_ceiling_is_untouched(tmp_path):
+    captured = {}
+    p = _make_provider(tmp_path, _capturing_handler("analyst_estimates", captured))
+
+    p.analyst_estimates("NVDA", limit=ESTIMATES_MAX_LIMIT)
+
+    assert captured["request"].url.params.get("limit") == str(ESTIMATES_MAX_LIMIT)
 
 
 def test_income_quarterly_url_and_params(tmp_path):
@@ -341,13 +377,13 @@ def test_methods_use_distinct_cache_keys(tmp_path):
     p.profile("NVDA")
     p.income_annual("NVDA")
 
-    assert cache.get("NVDA", "profile") == _load_fixture("profile")
-    assert cache.get("NVDA", "income_annual") == _load_fixture("income_annual")
+    assert cache.get("NVDA", "fmp_profile") == _load_fixture("profile")
+    assert cache.get("NVDA", "fmp_income_annual") == _load_fixture("income_annual")
 
 
 def test_get_json_serves_from_cache_without_hitting_transport(tmp_path):
     cache = Cache(tmp_path)
-    cache.put("NVDA", "profile", _load_fixture("profile"))
+    cache.put("NVDA", "fmp_profile", _load_fixture("profile"))
 
     def handler(request):
         raise AssertionError("transport should not be called on cache hit")

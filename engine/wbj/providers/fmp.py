@@ -25,6 +25,22 @@ from wbj.providers.base import Provider
 
 BASE_URL = "https://financialmodelingprep.com/stable"
 
+# FMP rejects a `limit` above the plan's ceiling with a 402 for the *whole*
+# request, so an over-limit ask returns no data at all rather than fewer
+# rows. Callers therefore clamp before asking.
+#
+# The ceiling is per-endpoint, not per-plan. Re-measured against the live
+# API 2026-07-20 after the subscription upgrade: statements and insider
+# trades accept 400+ (no practical ceiling), while analyst estimates still
+# 402 above 10. A single global cap was previously set to 5 — correct for
+# the old plan, but it now truncates statement history that the plan does
+# serve, so only the endpoint that actually caps is capped.
+ESTIMATES_MAX_LIMIT = 10
+
+# Endpoints still outside the plan entirely (402 regardless of `limit`):
+# `institutional-ownership/*` — the 13F data. Superinvestor positions come
+# from SEC EDGAR instead; see `wbj.filings.superinvestors`.
+
 # max_age_days per cache key:
 #   ohlcv_daily/quote 1, analyst_estimates 7, statements 30,
 #   profile/peers/holders/insiders 7.
@@ -50,9 +66,21 @@ class FMPProvider(Provider):
         """True iff an FMP API key is configured."""
         return bool(self.settings and getattr(self.settings, "fmp_api_key", None))
 
-    def _params(self, **extra: Any) -> dict[str, Any]:
+    def _params(self, limit_cap: int | None = None, **extra: Any) -> dict[str, Any]:
+        """Build query params, clamping `limit` to `limit_cap` when given.
+
+        Only endpoints with a measured ceiling pass `limit_cap`; the rest
+        send the caller's `limit` untouched, because clamping an endpoint
+        that does not cap silently throws away history the plan serves.
+        """
         params = {"apikey": self.settings.fmp_api_key}
         params.update(extra)
+        if (
+            limit_cap is not None
+            and params.get("limit") is not None
+            and params["limit"] > limit_cap
+        ):
+            params["limit"] = limit_cap
         return params
 
     def profile(self, t: str) -> list | dict | None:
@@ -163,12 +191,19 @@ class FMPProvider(Provider):
         )
 
     def analyst_estimates(self, t: str, limit: int = 10) -> list | dict | None:
-        """Analyst revenue/EPS estimates (annual)."""
+        """Analyst revenue/EPS estimates (annual).
+
+        The only endpoint that still caps `limit` (at 10) on the current
+        plan; asking for more 402s the whole request.
+        """
         if not self.available:
             return None
         return self.get_json(
             f"{BASE_URL}/analyst-estimates",
-            self._params(symbol=t, period="annual", limit=limit),
+            self._params(
+                limit_cap=ESTIMATES_MAX_LIMIT,
+                symbol=t, period="annual", limit=limit,
+            ),
             "analyst_estimates", t, max_age_days=_MAX_AGE_ESTIMATES,
         )
 

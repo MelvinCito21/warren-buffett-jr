@@ -1,4 +1,4 @@
-name: Pre-Market Movers Email
+name: Resumen Diario de Mercado
 
 on:
   schedule:
@@ -14,9 +14,14 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
-      - name: Send pre-market movers email
+      - name: Enviar resumen diario de mercado
         env:
           RESEND_API_KEY: ${{ secrets.RESEND_API_KEY }}
+          # Alimenta noticias, earnings, macro e insiders. Sin esta clave
+          # esas cuatro secciones se omiten y el correo manda solo los movers.
+          FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
+          # Destinatario — es dato personal, va como secret, no en el código.
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
           # En corrida manual, salta el chequeo de hora/feriado:
           FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
         run: python3 scripts/premarket_email.py

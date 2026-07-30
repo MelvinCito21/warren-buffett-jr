@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 
 import httpx
 
+from wbj.config import Settings
 from wbj.providers.base import Provider
 from wbj.providers.cache import Cache
 
@@ -47,7 +48,7 @@ def test_cache_writes_expected_file_layout(tmp_path):
 
 def test_get_json_serves_from_cache_without_hitting_transport(tmp_path):
     cache = Cache(tmp_path)
-    cache.put("NVDA", "profile", {"name": "NVIDIA"})
+    cache.put("NVDA", "provider_profile", {"name": "NVIDIA"})
 
     def handler(request):
         raise AssertionError("transport should not be called on cache hit")
@@ -63,8 +64,8 @@ def test_get_json_serves_from_cache_without_hitting_transport(tmp_path):
 
 def test_get_json_refetches_when_cache_stale(tmp_path):
     cache = Cache(tmp_path)
-    cache.put("NVDA", "profile", {"name": "OLD"})
-    path = tmp_path / "NVDA" / "profile.json"
+    cache.put("NVDA", "provider_profile", {"name": "OLD"})
+    path = tmp_path / "NVDA" / "provider_profile.json"
     record = json.loads(path.read_text())
     record["fetched_at"] = (
         datetime.now(timezone.utc) - timedelta(days=10)
@@ -89,7 +90,7 @@ def test_get_json_refetches_when_cache_stale(tmp_path):
 
 def test_get_json_serves_fresh_cache_within_max_age(tmp_path):
     cache = Cache(tmp_path)
-    cache.put("NVDA", "profile", {"name": "FRESH"})
+    cache.put("NVDA", "provider_profile", {"name": "FRESH"})
 
     def handler(request):
         raise AssertionError("transport should not be called for fresh cache")
@@ -285,7 +286,7 @@ def test_get_json_caches_successful_response(tmp_path):
         client=httpx.Client(transport=httpx.MockTransport(handler)),
     )
     p.get_json("https://x.test/a", {}, "profile", "NVDA")
-    assert cache.get("NVDA", "profile") == {"name": "NVIDIA"}
+    assert cache.get("NVDA", "provider_profile") == {"name": "NVIDIA"}
 
 
 # --- Provider.get_json: apikey never logged --------------------------------
@@ -323,3 +324,43 @@ def test_get_json_does_not_log_token_value(tmp_path, caplog):
         p.get_json("https://x.test/a", {"token": "SUPERSECRET"}, "k", "NVDA")
 
     assert "SUPERSECRET" not in caplog.text
+
+
+# --- per-provider cache namespacing -----------------------------------------
+
+
+def test_two_providers_sharing_a_cache_key_do_not_clobber_each_other(tmp_path):
+    """FMP and FinnHub both expose `earnings_calendar`. Sharing a cache slot
+    made the second provider read back the first one's payload, so a
+    cross-source check silently confirmed a figure it never fetched."""
+    from wbj.providers.finnhub import FinnhubProvider
+    from wbj.providers.fmp import FMPProvider
+
+    cache = Cache(tmp_path)
+
+    def fmp_handler(request):
+        return httpx.Response(200, json=[{"source": "fmp"}])
+
+    def finnhub_handler(request):
+        return httpx.Response(200, json=[{"source": "finnhub"}])
+
+    fmp = FMPProvider(
+        Settings(fmp_api_key="k"), cache,
+        client=httpx.Client(transport=httpx.MockTransport(fmp_handler)),
+    )
+    finnhub = FinnhubProvider(
+        Settings(finnhub_api_key="k"), cache,
+        client=httpx.Client(transport=httpx.MockTransport(finnhub_handler)),
+    )
+
+    assert fmp.earnings_calendar("NVDA") == [{"source": "fmp"}]
+    assert finnhub.earnings_calendar("NVDA") == [{"source": "finnhub"}]
+    # And the first provider still reads its own payload afterwards.
+    assert fmp.earnings_calendar("NVDA") == [{"source": "fmp"}]
+
+
+def test_cache_namespace_is_derived_from_the_provider_class(tmp_path):
+    from wbj.providers.fmp import FMPProvider
+
+    assert Provider(settings=None, cache=Cache(tmp_path)).cache_namespace == "provider"
+    assert FMPProvider(Settings(fmp_api_key="k"), Cache(tmp_path)).cache_namespace == "fmp"
