@@ -23,6 +23,7 @@ import json
 import os
 import re
 import sys
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime
@@ -471,8 +472,17 @@ def send_resend(subject: str, text: str, htmlbody: str) -> None:
         "https://api.resend.com/emails", data=payload, method="POST",
         headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=30) as r:
-        print(f"Resend: {r.status} {r.read().decode()}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as r:
+            print(f"Resend: {r.status} {r.read().decode()}")
+    except urllib.error.HTTPError as e:
+        # urlopen raises before we can read the body, so Resend's actual
+        # reason (invalid key, unverified sender, recipient restriction on
+        # the shared onboarding@resend.dev address) is otherwise invisible.
+        # Surfacing it turns a bare "403 Forbidden" into an actionable message.
+        body = e.read().decode(errors="replace")
+        print(f"ERROR Resend {e.code}: {body}", file=sys.stderr)
+        raise
 
 
 def main() -> int:
