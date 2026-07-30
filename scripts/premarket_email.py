@@ -470,7 +470,14 @@ def send_resend(subject: str, text: str, htmlbody: str) -> None:
     }).encode()
     req = urllib.request.Request(
         "https://api.resend.com/emails", data=payload, method="POST",
-        headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {key}",
+            "Content-Type": "application/json",
+            # Cloudflare (in front of Resend) 403s the default
+            # `Python-urllib` agent as a bot with error code 1010. A normal
+            # User-Agent gets a legitimate, authenticated API call through.
+            "User-Agent": "warren-buffett-jr/1.0 (+https://github.com)",
+        },
     )
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
