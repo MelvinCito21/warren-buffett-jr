@@ -2,16 +2,12 @@ name: Resumen Diario de Mercado
 
 on:
   schedule:
-    # 8:xx AM ET = 12:xx UTC (verano/EDT) o 13:xx UTC (invierno/EST).
-    # Corren ambos crons; el script verifica la hora ET y solo envía cuando
-    # es la hora 8 (así solo uno de los dos envía, según horario de verano).
-    #
-    # A los 12 minutos, NO en punto: GitHub congestiona y descarta las
-    # corridas programadas al inicio de cada hora (lo advierte su propia
-    # documentación), y a las 8:00 en punto no llegó. Correr desde el minuto
-    # 12 esquiva esa congestión y deja ~47 min de margen si GitHub la retrasa.
+    # UN solo cron: 12:12 UTC de lunes a viernes (~8:12 AM ET en verano,
+    # ~7:12 AM ET en invierno). El script ya NO exige una hora exacta —
+    # GitHub dispara los cron con retraso impredecible, así que se envía
+    # cuando la corrida ocurra. Un solo cron evita enviar dos veces.
+    # Al minuto 12 (no en punto) para esquivar la congestión de GitHub.
     - cron: "12 12 * * 1-5"
-    - cron: "12 13 * * 1-5"
   workflow_dispatch: # botón "Run workflow" para probar manualmente
 
 jobs:

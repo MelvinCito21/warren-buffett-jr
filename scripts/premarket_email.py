@@ -497,10 +497,11 @@ def main() -> int:
     force = os.environ.get("FORCE") == "1"
 
     if not force:
-        # El workflow corre 12:00 y 13:00 UTC; solo una equivale a las 8 ET.
-        if now.hour != 8:
-            print(f"Son las {now.strftime('%H:%M')} ET, no las 8 — skip (cron UTC/DST).")
-            return 0
+        # NO se exige una hora exacta. GitHub dispara los cron programados
+        # con retraso impredecible (se han visto 5+ horas): un candado de
+        # "solo a las 8 AM ET" rechazaba esas corridas tardías y el correo
+        # nunca salía. Con un solo cron por día, basta con verificar que el
+        # mercado esté abierto hoy; la hora de entrega la decide GitHub.
         if now.weekday() >= 5 or now.strftime("%Y-%m-%d") in MARKET_HOLIDAYS:
             print("Mercado cerrado hoy — skip.")
             return 0
