@@ -509,9 +509,12 @@ def main() -> int:
     gainers = parse_movers(fetch(GAINERS_URL))
     losers = parse_movers(fetch(LOSERS_URL))
     if not gainers and not losers:
-        print("ERROR: no pude parsear movers (¿cambió el HTML de stockanalysis.com?)",
-              file=sys.stderr)
-        return 1
+        # No es fatal: la página de pre-market queda vacía fuera de la
+        # mañana, y si GitHub dispara la corrida tarde no habría movers.
+        # El correo aún trae noticias, macro, earnings e insiders, así que
+        # se envía igual con la sección de movers vacía en vez de fallar.
+        print("Aviso: sin movers pre-market (página vacía o cambió el HTML); "
+              "envío el resto de secciones.", file=sys.stderr)
 
     subject, text, htmlbody = build_email(now, gainers, losers)
 
