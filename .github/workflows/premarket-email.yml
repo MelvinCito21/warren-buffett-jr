@@ -1,14 +1,17 @@
 name: Resumen Diario de Mercado
 
 on:
-  schedule:
-    # UN solo cron: 12:12 UTC de lunes a viernes (~8:12 AM ET en verano,
-    # ~7:12 AM ET en invierno). El script ya NO exige una hora exacta —
-    # GitHub dispara los cron con retraso impredecible, así que se envía
-    # cuando la corrida ocurra. Un solo cron evita enviar dos veces.
-    # Al minuto 12 (no en punto) para esquivar la congestión de GitHub.
-    - cron: "12 12 * * 1-5"
-  workflow_dispatch: # botón "Run workflow" para probar manualmente
+  # Disparado por un temporizador externo (cron-job.org) vía la API de
+  # GitHub, a una hora exacta antes de que abra el mercado. Los cron
+  # PROGRAMADOS de GitHub gratis llegan con horas de retraso (se vio 5-6h);
+  # un `workflow_dispatch` corre de inmediato, en segundos. Por eso ya no
+  # hay bloque `schedule` — el reloj vive afuera.
+  workflow_dispatch:
+    inputs:
+      force:
+        description: "Forzar envío aunque sea fin de semana o feriado (para probar)"
+        type: boolean
+        default: false
 
 jobs:
   send:
@@ -24,6 +27,8 @@ jobs:
           FMP_API_KEY: ${{ secrets.FMP_API_KEY }}
           # Destinatario — es dato personal, va como secret, no en el código.
           EMAIL_TO: ${{ secrets.EMAIL_TO }}
-          # En corrida manual, salta el chequeo de hora/feriado:
-          FORCE: ${{ github.event_name == 'workflow_dispatch' && '1' || '0' }}
+          # El empujón externo NO manda `force`, así que FORCE=0 y el script
+          # respeta feriados (cron-job.org ya lo limita a lunes-viernes). El
+          # botón manual sí puede marcar `force` para probar en cualquier día.
+          FORCE: ${{ inputs.force && '1' || '0' }}
         run: python3 scripts/premarket_email.py
